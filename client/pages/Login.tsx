@@ -14,18 +14,19 @@ export default function Login() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    setError("");
-    setIsLoading(true);
+    void (async () => {
+      setError("");
+      setIsLoading(true);
 
-    // Simulate API delay
-    setTimeout(() => {
-      if (login(email, password)) {
+      const result = await login(email, password);
+      if (result.success) {
         navigate("/users");
       } else {
-        setError("Invalid email or password. Try safal@northsouth.edu / demo123");
+        setError(result.error ?? "Invalid email or password");
       }
+
       setIsLoading(false);
-    }, 500);
+    })();
   };
 
   return (
@@ -106,11 +107,10 @@ export default function Login() {
             </Button>
           </form>
 
-          {/* Demo credentials hint */}
           <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-xs font-semibold text-blue-900 uppercase tracking-wide mb-2">Demo Credentials:</p>
-            <p className="text-sm text-blue-700">Email: <code className="font-mono bg-white px-2 py-1 rounded">safal@northsouth.edu</code></p>
-            <p className="text-sm text-blue-700">Password: <code className="font-mono bg-white px-2 py-1 rounded">demo123</code></p>
+            <p className="text-sm text-blue-700">
+              Sign in with any account created from the Register page.
+            </p>
           </div>
 
           <div className="border-t border-gray-200 pt-6">

@@ -1,19 +1,177 @@
 import { useAuth } from "@/context/AuthContext";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { LogOut, Mail, Calendar, User, Search } from "lucide-react";
-import { useState, useMemo } from "react";
+import { LogOut, Mail, Calendar, User, Search, Pencil, Trash2, Plus } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { UserRecord, UsersResponse } from "@shared/api";
 
 export default function Users() {
-  const { isAuthenticated, currentUser, logout, users } = useAuth();
+  const { isAuthenticated, currentUser, logout, token, authLoading } = useAuth();
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
+  const [users, setUsers] = useState<UserRecord[]>([]);
+  const [isLoadingUsers, setIsLoadingUsers] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  const [createEmail, setCreateEmail] = useState("");
+  const [createFullName, setCreateFullName] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [editEmail, setEditEmail] = useState("");
+  const [editFullName, setEditFullName] = useState("");
+  const [editPassword, setEditPassword] = useState("");
 
-  // Redirect if not authenticated
-  if (!isAuthenticated || !currentUser) {
-    navigate("/login");
+  useEffect(() => {
+    if (!authLoading && (!isAuthenticated || !currentUser)) {
+      navigate("/login");
+    }
+  }, [authLoading, isAuthenticated, currentUser, navigate]);
+
+  if (authLoading || !currentUser || !token) {
     return null;
   }
+
+  const loadUsers = async (signal?: AbortSignal) => {
+    try {
+      setIsLoadingUsers(true);
+      setLoadError("");
+
+      const response = await fetch("/api/users", {
+        signal,
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to load users: ${response.status}`);
+      }
+
+      const data = (await response.json()) as UsersResponse;
+      setUsers(data.users);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return;
+      }
+
+      setLoadError("Could not load users from the database.");
+    } finally {
+      setIsLoadingUsers(false);
+    }
+  };
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void loadUsers(controller.signal);
+    return () => controller.abort();
+  }, [token]);
+
+  const handleCreateUser = async () => {
+    try {
+      setActionError("");
+      setIsSaving(true);
+
+      const response = await fetch("/api/users", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          email: createEmail,
+          fullName: createFullName,
+          password: createPassword,
+        }),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setActionError(data.error ?? "Failed to create user");
+        return;
+      }
+
+      setCreateEmail("");
+      setCreateFullName("");
+      setCreatePassword("");
+      await loadUsers();
+    } catch (_error) {
+      setActionError("Failed to create user");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const startEdit = (user: UserRecord) => {
+    setEditingUserId(user.id);
+    setEditEmail(user.email);
+    setEditFullName(user.fullName);
+    setEditPassword("");
+    setActionError("");
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUserId) {
+      return;
+    }
+
+    try {
+      setActionError("");
+      setIsSaving(true);
+
+      const body: { email?: string; fullName?: string; password?: string } = {
+        email: editEmail,
+        fullName: editFullName,
+      };
+      if (editPassword.trim()) {
+        body.password = editPassword;
+      }
+
+      const response = await fetch(`/api/users/${editingUserId}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setActionError(data.error ?? "Failed to update user");
+        return;
+      }
+
+      setEditingUserId(null);
+      await loadUsers();
+    } catch (_error) {
+      setActionError("Failed to update user");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDeleteUser = async (userId: string) => {
+    try {
+      setActionError("");
+      const response = await fetch(`/api/users/${userId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setActionError(data.error ?? "Failed to delete user");
+        return;
+      }
+
+      await loadUsers();
+    } catch (_error) {
+      setActionError("Failed to delete user");
+    }
+  };
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) =>
@@ -82,6 +240,45 @@ export default function Users() {
           </div>
         </div>
 
+        <div className="bg-white rounded-xl shadow-md p-6 mb-8">
+          <h3 className="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+            <Plus className="w-5 h-5" />
+            Create User
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input
+              type="text"
+              value={createFullName}
+              onChange={(e) => setCreateFullName(e.target.value)}
+              placeholder="Full name"
+              className="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <input
+              type="email"
+              value={createEmail}
+              onChange={(e) => setCreateEmail(e.target.value)}
+              placeholder="Email"
+              className="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+            <input
+              type="password"
+              value={createPassword}
+              onChange={(e) => setCreatePassword(e.target.value)}
+              placeholder="Password"
+              className="px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+
+          <div className="mt-4 flex justify-end">
+            <Button onClick={handleCreateUser} disabled={isSaving}>
+              {isSaving ? "Saving..." : "Create User"}
+            </Button>
+          </div>
+
+          {actionError && <p className="text-sm text-red-700 mt-3">{actionError}</p>}
+        </div>
+
         {/* Stats */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <div className="bg-white rounded-xl shadow-md p-6 border-l-4 border-blue-600">
@@ -99,7 +296,16 @@ export default function Users() {
         </div>
 
         {/* Users Grid */}
-        {filteredUsers.length > 0 ? (
+        {isLoadingUsers ? (
+          <div className="bg-white rounded-xl shadow-md p-12 text-center">
+            <p className="text-gray-700">Loading students from MongoDB...</p>
+          </div>
+        ) : loadError ? (
+          <div className="bg-red-50 border border-red-200 rounded-xl shadow-md p-12 text-center">
+            <h3 className="text-lg font-semibold text-red-800 mb-2">Failed to load students</h3>
+            <p className="text-red-700">{loadError}</p>
+          </div>
+        ) : filteredUsers.length > 0 ? (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filteredUsers.map((user) => (
               <div
@@ -134,11 +340,30 @@ export default function Users() {
                     </div>
                   </div>
 
-                  {user.id === currentUser.id && (
+                  {user.email === currentUser.email && (
                     <div className="mt-4 pt-4 border-t border-gray-200">
                       <span className="inline-block bg-blue-100 text-blue-800 text-xs font-semibold px-3 py-1 rounded-full">
                         You
                       </span>
+                    </div>
+                  )}
+
+                  {user.email !== currentUser.email && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => startEdit(user)}>
+                        <Pencil className="w-4 h-4 mr-1" /> Edit
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        size="sm"
+                        onClick={() => {
+                          if (window.confirm(`Delete ${user.fullName}?`)) {
+                            void handleDeleteUser(user.id);
+                          }
+                        }}
+                      >
+                        <Trash2 className="w-4 h-4 mr-1" /> Delete
+                      </Button>
                     </div>
                   )}
                 </div>
@@ -152,6 +377,49 @@ export default function Users() {
             <p className="text-gray-600">
               Try adjusting your search criteria to find the student you're looking for.
             </p>
+          </div>
+        )}
+
+        {editingUserId && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center p-4 z-50">
+            <div className="w-full max-w-lg bg-white rounded-xl shadow-xl p-6">
+              <h3 className="text-xl font-bold text-gray-900 mb-4">Edit User</h3>
+
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={editFullName}
+                  onChange={(e) => setEditFullName(e.target.value)}
+                  placeholder="Full name"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <input
+                  type="email"
+                  value={editEmail}
+                  onChange={(e) => setEditEmail(e.target.value)}
+                  placeholder="Email"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+                <input
+                  type="password"
+                  value={editPassword}
+                  onChange={(e) => setEditPassword(e.target.value)}
+                  placeholder="New password (optional)"
+                  className="w-full px-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                />
+              </div>
+
+              {actionError && <p className="text-sm text-red-700 mt-3">{actionError}</p>}
+
+              <div className="mt-6 flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setEditingUserId(null)}>
+                  Cancel
+                </Button>
+                <Button onClick={() => void handleUpdateUser()} disabled={isSaving}>
+                  {isSaving ? "Saving..." : "Save Changes"}
+                </Button>
+              </div>
+            </div>
           </div>
         )}
       </div>

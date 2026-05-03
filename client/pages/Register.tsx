@@ -25,25 +25,26 @@ export default function Register() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const validationError = validateForm();
     if (validationError) {
       setError(validationError);
       return;
     }
 
-    setError("");
-    setIsLoading(true);
+    void (async () => {
+      setError("");
+      setIsLoading(true);
 
-    // Simulate API delay
-    setTimeout(() => {
-      if (register(email, password, fullName)) {
+      const result = await register(email, password, fullName);
+      if (result.success) {
         navigate("/users");
       } else {
-        setError("Email already registered or invalid input");
+        setError(result.error ?? "Email already registered or invalid input");
       }
+
       setIsLoading(false);
-    }, 500);
+    })();
   };
 
   return (
