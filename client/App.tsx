@@ -10,6 +10,11 @@ import Index from "./pages/Index";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Users from "./pages/Users";
+import LostFound from "./pages/LostFound";
+import ReportItem from "./pages/ReportItem";
+import ItemDetail from "./pages/ItemDetail";
+import MyItems from "./pages/MyItems";
+import Matches from "./pages/Matches";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -27,6 +32,11 @@ export default function App() {
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
               <Route path="/users" element={<Users />} />
+              <Route path="/lost-found" element={<LostFound />} />
+              <Route path="/lost-found/report" element={<ReportItem />} />
+              <Route path="/lost-found/item/:id" element={<ItemDetail />} />
+              <Route path="/lost-found/my-items" element={<MyItems />} />
+              <Route path="/lost-found/matches" element={<Matches />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

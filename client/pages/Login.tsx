@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Mail, Lock, AlertCircle } from "lucide-react";
+import { Mail, Lock, AlertCircle, Package } from "lucide-react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
@@ -20,7 +20,7 @@ export default function Login() {
 
       const result = await login(email, password);
       if (result.success) {
-        navigate("/users");
+        navigate("/lost-found");
       } else {
         setError(result.error ?? "Invalid email or password");
       }
@@ -30,17 +30,13 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-4">
-            <img
-              src="https://cdn.builder.io/api/v1/image/assets%2Fd06ffa43e72e464cb894aea9b7a49da7%2F0d9288f2cb6f429182d072aafd61b6cf?format=webp&width=800&height=1200"
-              alt="NSU Logo"
-              className="w-10 h-10 rounded-lg"
-            />
-            <h1 className="text-2xl font-bold text-gray-900">NSU Portal</h1>
+            <Package className="w-10 h-10 text-orange-600" />
+            <h1 className="text-2xl font-bold text-gray-900">NSU Lost & Found</h1>
           </div>
           <p className="text-gray-600">North South University</p>
         </div>
@@ -50,7 +46,7 @@ export default function Login() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Sign In</h2>
             <p className="text-gray-600 text-sm mt-1">
-              Access your university portal
+              Access the lost & found portal
             </p>
           </div>
 
@@ -74,7 +70,7 @@ export default function Login() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
                   required
                 />
               </div>
@@ -92,7 +88,7 @@ export default function Login() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
                   required
                 />
               </div>
@@ -101,29 +97,29 @@ export default function Login() {
             <Button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-2.5 rounded-lg transition"
+              className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold py-2.5 rounded-lg transition"
             >
               {isLoading ? "Signing in..." : "Sign In"}
             </Button>
           </form>
-
-          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-            <p className="text-sm text-blue-700">
-              Sign in with any account created from the Register page.
-            </p>
-          </div>
 
           <div className="border-t border-gray-200 pt-6">
             <p className="text-center text-gray-600 text-sm">
               Don't have an account?{" "}
               <Link
                 to="/register"
-                className="text-blue-600 hover:text-blue-700 font-semibold transition"
+                className="text-orange-600 hover:text-orange-700 font-semibold transition"
               >
                 Create one
               </Link>
             </p>
           </div>
+        </div>
+
+        <div className="text-center mt-6">
+          <Link to="/" className="text-sm text-gray-500 hover:text-gray-700">
+            &larr; Back to home
+          </Link>
         </div>
       </div>
     </div>

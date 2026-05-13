@@ -7,11 +7,21 @@ let client: MongoClient | null = null;
 let db: Db | null = null;
 
 export async function getMongoDb(): Promise<Db> {
-  if (db) {
-    return db;
+  if (db && client) {
+    try {
+      await client.db("admin").command({ ping: 1 });
+      return db;
+    } catch {
+      // Connection stale, reconnect
+      client = null;
+      db = null;
+    }
   }
 
-  client = new MongoClient(mongoUri);
+  client = new MongoClient(mongoUri, {
+    serverSelectionTimeoutMS: 10000,
+    connectTimeoutMS: 10000,
+  });
   await client.connect();
   db = client.db(dbName);
   return db;

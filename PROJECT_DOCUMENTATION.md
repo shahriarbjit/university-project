@@ -1,4 +1,4 @@
-# NSU Portal - Full Stack Student Management System
+# NSU Portal - Full Stack Student Management & Lost & Found System
 ## Project Documentation
 
 ---
@@ -39,6 +39,9 @@
 - Self-account protection (cannot delete/edit own account)
 - Token refresh and session restoration on page reload
 - Real-time database synchronization via REST API
+- **Lost & Found system** — report lost/found items
+- **Smart matching algorithm** — automatically matches lost items with found items
+- **Match confirmation workflow** — confirm or reject matches, auto-resolve items
 
 ---
 
@@ -452,6 +455,110 @@ Indexes:
   "createdAt": ISODate("2026-05-03T08:30:00Z")
 }
 ```
+
+---
+
+## Lost & Found System
+
+### Overview
+
+The Lost & Found system allows students to report lost and found items on campus and uses a smart matching algorithm to connect owners with finders.
+
+### Item Lifecycle
+
+```
+Student reports LOST item     Student reports FOUND item
+        ↓                              ↓
+   Status: "lost"                Status: "found"
+        ↓                              ↓
+   Run Matching Algorithm ←────────────┘
+        ↓
+   Match found (score >= 25%)
+        ↓
+   Match status: "pending"
+        ↓
+   User confirms match ──→ Both items status: "resolved"
+   User rejects match  ──→ Items remain active
+```
+
+### API Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/api/items` | Yes | List/search items (supports q, type, category, status, location, dateFrom, dateTo, page, limit) |
+| GET | `/api/items/my` | Yes | Get current user's items |
+| GET | `/api/items/:id` | Yes | Get single item |
+| POST | `/api/items` | Yes | Report lost/found item |
+| PUT | `/api/items/:id` | Yes | Update own item |
+| DELETE | `/api/items/:id` | Yes | Delete own item |
+| POST | `/api/matches/run` | Yes | Run matching for an item |
+| GET | `/api/matches` | Yes | Get matches for user's items |
+| GET | `/api/matches/item/:id` | Yes | Get matches for specific item |
+| PUT | `/api/matches/:id` | Yes | Confirm or reject a match |
+
+### Matching Algorithm
+
+The matching algorithm compares lost items against found items using 5 weighted criteria (max 100 points):
+
+| Criterion | Max Points | Logic |
+|-----------|-----------|-------|
+| **Category** | 30 | Exact match |
+| **Title** | 25 | Jaccard word similarity |
+| **Description** | 20 | Jaccard word similarity |
+| **Location** | 15 | Exact or partial match |
+| **Date proximity** | 10 | ≤1 day=10, ≤3 days=7, ≤7 days=4, ≤14 days=2 |
+
+- **Threshold**: Items scoring ≥25 points generate a match
+- **Deduplication**: Duplicate matches are skipped
+- **Confirmation**: When confirmed, both items auto-resolve
+
+### Database Collections
+
+**items**:
+```javascript
+{
+  _id: ObjectId,
+  type: "lost" | "found",
+  status: "lost" | "found" | "matched" | "resolved",
+  title: String,
+  description: String,
+  category: String,    // electronics, clothing, accessories, documents, keys, bags, books, sports, other
+  location: String,
+  date: Date,
+  imageUrl: String?,
+  contactEmail: String,
+  contactPhone: String?,
+  reportedBy: ObjectId,
+  reportedByName: String,
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+**matches**:
+```javascript
+{
+  _id: ObjectId,
+  lostItemId: ObjectId,
+  foundItemId: ObjectId,
+  lostItemTitle: String,
+  foundItemTitle: String,
+  score: Number,        // 0-100
+  reasons: String[],    // Human-readable match reasons
+  status: "pending" | "confirmed" | "rejected",
+  createdAt: Date
+}
+```
+
+### Frontend Pages
+
+| Route | Page | Description |
+|-------|------|-------------|
+| `/lost-found` | Dashboard | Browse all items with search & filters |
+| `/lost-found/report` | Report Item | Form to report lost or found item |
+| `/lost-found/item/:id` | Item Detail | Full item view + matching + contact info |
+| `/lost-found/my-items` | My Items | User's own reported items |
+| `/lost-found/matches` | Matches | View & manage matches with confirm/reject |
 
 ---
 

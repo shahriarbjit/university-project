@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { Mail, Lock, User, AlertCircle, CheckCircle } from "lucide-react";
+import { Mail, Lock, User, AlertCircle, CheckCircle, Package } from "lucide-react";
 
 export default function Register() {
   const [fullName, setFullName] = useState("");
@@ -38,7 +38,7 @@ export default function Register() {
 
       const result = await register(email, password, fullName);
       if (result.success) {
-        navigate("/users");
+        navigate("/lost-found");
       } else {
         setError(result.error ?? "Email already registered or invalid input");
       }
@@ -48,17 +48,13 @@ export default function Register() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-orange-50 via-white to-amber-50 flex items-center justify-center p-4">
       <div className="w-full max-w-md">
         {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-2 mb-4">
-            <img
-              src="https://cdn.builder.io/api/v1/image/assets%2Fd06ffa43e72e464cb894aea9b7a49da7%2F0d9288f2cb6f429182d072aafd61b6cf?format=webp&width=800&height=1200"
-              alt="NSU Logo"
-              className="w-10 h-10 rounded-lg"
-            />
-            <h1 className="text-2xl font-bold text-gray-900">NSU Portal</h1>
+            <Package className="w-10 h-10 text-orange-600" />
+            <h1 className="text-2xl font-bold text-gray-900">NSU Lost & Found</h1>
           </div>
           <p className="text-gray-600">North South University</p>
         </div>
@@ -68,7 +64,7 @@ export default function Register() {
           <div>
             <h2 className="text-2xl font-bold text-gray-900">Create Account</h2>
             <p className="text-gray-600 text-sm mt-1">
-              Join our university community
+              Join the campus lost & found community
             </p>
           </div>
 
@@ -92,7 +88,7 @@ export default function Register() {
                   value={fullName}
                   onChange={(e) => setFullName(e.target.value)}
                   placeholder="Enter your full name"
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
                   required
                 />
               </div>
@@ -110,7 +106,7 @@ export default function Register() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="Enter your email"
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
                   required
                 />
               </div>
@@ -128,7 +124,7 @@ export default function Register() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 6 characters"
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
                   required
                 />
               </div>
@@ -146,7 +142,7 @@ export default function Register() {
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   placeholder="Confirm your password"
-                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-orange-500 focus:border-transparent outline-none transition"
                   required
                 />
               </div>
@@ -155,23 +151,23 @@ export default function Register() {
             <Button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold py-2.5 rounded-lg transition"
+              className="w-full bg-gradient-to-r from-orange-500 to-red-500 hover:from-orange-600 hover:to-red-600 text-white font-semibold py-2.5 rounded-lg transition"
             >
               {isLoading ? "Creating account..." : "Create Account"}
             </Button>
           </form>
 
           {/* Password requirements */}
-          <div className="bg-green-50 border border-green-200 rounded-lg p-4">
-            <p className="text-xs font-semibold text-green-900 uppercase tracking-wide mb-3">Password Requirements:</p>
+          <div className="bg-orange-50 border border-orange-200 rounded-lg p-4">
+            <p className="text-xs font-semibold text-orange-900 uppercase tracking-wide mb-3">Password Requirements:</p>
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <CheckCircle className={`w-4 h-4 ${password.length >= 6 ? 'text-green-600' : 'text-gray-400'}`} />
-                <span className="text-sm text-green-700">At least 6 characters</span>
+                <span className="text-sm text-gray-700">At least 6 characters</span>
               </div>
               <div className="flex items-center gap-2">
                 <CheckCircle className={`w-4 h-4 ${password === confirmPassword && password ? 'text-green-600' : 'text-gray-400'}`} />
-                <span className="text-sm text-green-700">Passwords match</span>
+                <span className="text-sm text-gray-700">Passwords match</span>
               </div>
             </div>
           </div>
@@ -181,12 +177,18 @@ export default function Register() {
               Already have an account?{" "}
               <Link
                 to="/login"
-                className="text-blue-600 hover:text-blue-700 font-semibold transition"
+                className="text-orange-600 hover:text-orange-700 font-semibold transition"
               >
                 Sign in
               </Link>
             </p>
           </div>
+        </div>
+
+        <div className="text-center mt-6">
+          <Link to="/" className="text-sm text-gray-500 hover:text-gray-700">
+            &larr; Back to home
+          </Link>
         </div>
       </div>
     </div>
