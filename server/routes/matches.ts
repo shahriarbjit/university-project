@@ -1,37 +1,19 @@
 import { RequestHandler } from "express";
-import { ObjectId } from "mongodb";
-import { getMongoDb } from "../db/mongodb";
 import type { MatchRecord, ItemCategory } from "@shared/api";
+import {
+  items,
+  matches,
+  nextId,
+  seedPromise,
+  type MemItem,
+  type MemMatch,
+} from "../db/memory-store";
 
-interface ItemDocument {
-  _id?: ObjectId;
-  type: "lost" | "found";
-  status: string;
-  title: string;
-  description: string;
-  category: ItemCategory;
-  location: string;
-  date: Date;
-  reportedBy: ObjectId;
-}
-
-interface MatchDocument {
-  _id?: ObjectId;
-  lostItemId: ObjectId;
-  foundItemId: ObjectId;
-  lostItemTitle: string;
-  foundItemTitle: string;
-  score: number;
-  reasons: string[];
-  status: "pending" | "confirmed" | "rejected";
-  createdAt: Date;
-}
-
-function mapMatchDocument(doc: MatchDocument): MatchRecord {
+function toMatchRecord(doc: MemMatch): MatchRecord {
   return {
-    id: doc._id?.toString() ?? "",
-    lostItemId: doc.lostItemId.toString(),
-    foundItemId: doc.foundItemId.toString(),
+    id: doc.id,
+    lostItemId: doc.lostItemId,
+    foundItemId: doc.foundItemId,
     lostItemTitle: doc.lostItemTitle,
     foundItemTitle: doc.foundItemTitle,
     score: doc.score,
@@ -64,19 +46,17 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>): number {
 }
 
 function computeMatchScore(
-  lost: ItemDocument,
-  found: ItemDocument
+  lost: MemItem,
+  found: MemItem
 ): { score: number; reasons: string[] } {
   let score = 0;
   const reasons: string[] = [];
 
-  // 1. Category match (30 points)
   if (lost.category === found.category) {
     score += 30;
     reasons.push(`Same category: ${lost.category}`);
   }
 
-  // 2. Title similarity (25 points)
   const titleSim = jaccardSimilarity(tokenize(lost.title), tokenize(found.title));
   const titleScore = Math.round(titleSim * 25);
   if (titleScore > 5) {
@@ -84,18 +64,13 @@ function computeMatchScore(
     reasons.push(`Title similarity: ${Math.round(titleSim * 100)}%`);
   }
 
-  // 3. Description similarity (20 points)
-  const descSim = jaccardSimilarity(
-    tokenize(lost.description),
-    tokenize(found.description)
-  );
+  const descSim = jaccardSimilarity(tokenize(lost.description), tokenize(found.description));
   const descScore = Math.round(descSim * 20);
   if (descScore > 3) {
     score += descScore;
     reasons.push(`Description similarity: ${Math.round(descSim * 100)}%`);
   }
 
-  // 4. Location match (15 points)
   const lostLoc = lost.location.toLowerCase().trim();
   const foundLoc = found.location.toLowerCase().trim();
   if (lostLoc === foundLoc) {
@@ -110,10 +85,8 @@ function computeMatchScore(
     }
   }
 
-  // 5. Date proximity (10 points)
   const daysDiff = Math.abs(
-    (new Date(found.date).getTime() - new Date(lost.date).getTime()) /
-      (1000 * 60 * 60 * 24)
+    (new Date(found.date).getTime() - new Date(lost.date).getTime()) / (1000 * 60 * 60 * 24)
   );
   if (daysDiff <= 1) {
     score += 10;
@@ -134,76 +107,59 @@ function computeMatchScore(
 
 // ─── Routes ──────────────────────────────────────────────────
 
-// POST /api/matches/run — run matching algorithm for an item
+// POST /api/matches/run
 export const handleRunMatches: RequestHandler = async (req, res) => {
   try {
+    await seedPromise;
     const userId = req.authUser?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const { itemId } = req.body as { itemId?: string };
-    if (!itemId || !ObjectId.isValid(itemId)) {
-      return res.status(400).json({ error: "Valid itemId is required" });
-    }
+    if (!itemId) return res.status(400).json({ error: "Valid itemId is required" });
 
-    const db = await getMongoDb();
-    const itemsCol = db.collection<ItemDocument>("items");
-    const matchesCol = db.collection<MatchDocument>("matches");
-
-    const sourceItem = await itemsCol.findOne({ _id: new ObjectId(itemId) });
+    const sourceItem = items.find((i) => i.id === itemId);
     if (!sourceItem) return res.status(404).json({ error: "Item not found" });
 
-    // Find opposite-type items that are active (not resolved)
     const oppositeType = sourceItem.type === "lost" ? "found" : "lost";
-    const candidates = await itemsCol
-      .find({
-        type: oppositeType,
-        status: { $in: [oppositeType, "matched"] },
-      })
-      .toArray();
+    const candidates = items.filter(
+      (i) => i.type === oppositeType && (i.status === oppositeType || i.status === "matched")
+    );
 
     const MATCH_THRESHOLD = 25;
-    const newMatches: MatchDocument[] = [];
+    const newMatches: MemMatch[] = [];
 
     for (const candidate of candidates) {
-      const { score, reasons } = computeMatchScore(
-        sourceItem.type === "lost" ? sourceItem : candidate,
-        sourceItem.type === "found" ? sourceItem : candidate
-      );
+      const lost = sourceItem.type === "lost" ? sourceItem : candidate;
+      const found = sourceItem.type === "found" ? sourceItem : candidate;
+      const { score, reasons } = computeMatchScore(lost, found);
 
       if (score >= MATCH_THRESHOLD) {
-        const lostId =
-          sourceItem.type === "lost" ? sourceItem._id! : candidate._id!;
-        const foundId =
-          sourceItem.type === "found" ? sourceItem._id! : candidate._id!;
+        const lostId = lost.id;
+        const foundId = found.id;
 
-        // Check if match already exists
-        const existing = await matchesCol.findOne({
-          lostItemId: lostId,
-          foundItemId: foundId,
-        });
+        const existing = matches.find(
+          (m) => m.lostItemId === lostId && m.foundItemId === foundId
+        );
         if (existing) continue;
 
-        const matchDoc: MatchDocument = {
+        const matchDoc: MemMatch = {
+          id: nextId(),
           lostItemId: lostId,
           foundItemId: foundId,
-          lostItemTitle:
-            sourceItem.type === "lost" ? sourceItem.title : candidate.title,
-          foundItemTitle:
-            sourceItem.type === "found" ? sourceItem.title : candidate.title,
+          lostItemTitle: lost.title,
+          foundItemTitle: found.title,
           score,
           reasons,
           status: "pending",
           createdAt: new Date(),
         };
-
-        const result = await matchesCol.insertOne(matchDoc);
-        matchDoc._id = result.insertedId;
+        matches.push(matchDoc);
         newMatches.push(matchDoc);
       }
     }
 
     return res.status(200).json({
-      matches: newMatches.map(mapMatchDocument),
+      matches: newMatches.map(toMatchRecord),
       message: `Found ${newMatches.length} new match(es)`,
     });
   } catch (error) {
@@ -212,136 +168,73 @@ export const handleRunMatches: RequestHandler = async (req, res) => {
   }
 };
 
-// GET /api/matches — get matches for current user's items
+// GET /api/matches
 export const handleGetMatches: RequestHandler = async (req, res) => {
   try {
+    await seedPromise;
     const userId = req.authUser?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
-    const db = await getMongoDb();
+    const userItemIds = new Set(items.filter((i) => i.reportedBy === userId).map((i) => i.id));
+    if (userItemIds.size === 0) return res.status(200).json({ matches: [] });
 
-    // Get all item IDs belonging to current user
-    const userItems = await db
-      .collection<ItemDocument>("items")
-      .find(
-        { reportedBy: new ObjectId(userId) },
-        { projection: { _id: 1 } }
-      )
-      .toArray();
+    const result = matches
+      .filter((m) => userItemIds.has(m.lostItemId) || userItemIds.has(m.foundItemId))
+      .sort((a, b) => b.score - a.score || b.createdAt.getTime() - a.createdAt.getTime());
 
-    const userItemIds = userItems.map((i) => i._id!);
-
-    if (userItemIds.length === 0) {
-      return res.status(200).json({ matches: [] });
-    }
-
-    const matches = await db
-      .collection<MatchDocument>("matches")
-      .find({
-        $or: [
-          { lostItemId: { $in: userItemIds } },
-          { foundItemId: { $in: userItemIds } },
-        ],
-      })
-      .sort({ score: -1, createdAt: -1 })
-      .toArray();
-
-    return res.status(200).json({ matches: matches.map(mapMatchDocument) });
+    return res.status(200).json({ matches: result.map(toMatchRecord) });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return res.status(500).json({ error: `Failed to fetch matches: ${msg}` });
   }
 };
 
-// GET /api/matches/item/:id — get matches for a specific item
+// GET /api/matches/item/:id
 export const handleGetItemMatches: RequestHandler = async (req, res) => {
   try {
-    const paramId = req.params.id;
-    const id = Array.isArray(paramId) ? paramId[0] : paramId;
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "Invalid item ID" });
-    }
+    await seedPromise;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
 
-    const db = await getMongoDb();
-    const oid = new ObjectId(id);
-    const matches = await db
-      .collection<MatchDocument>("matches")
-      .find({
-        $or: [{ lostItemId: oid }, { foundItemId: oid }],
-      })
-      .sort({ score: -1 })
-      .toArray();
+    const result = matches
+      .filter((m) => m.lostItemId === id || m.foundItemId === id)
+      .sort((a, b) => b.score - a.score);
 
-    return res.status(200).json({ matches: matches.map(mapMatchDocument) });
+    return res.status(200).json({ matches: result.map(toMatchRecord) });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return res.status(500).json({ error: `Failed to fetch matches: ${msg}` });
   }
 };
 
-// PUT /api/matches/:id — update match status (confirm/reject)
+// PUT /api/matches/:id
 export const handleUpdateMatch: RequestHandler = async (req, res) => {
   try {
-    const paramId = req.params.id;
-    const id = Array.isArray(paramId) ? paramId[0] : paramId;
-    if (!ObjectId.isValid(id)) {
-      return res.status(400).json({ error: "Invalid match ID" });
-    }
-
+    await seedPromise;
+    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const userId = req.authUser?.userId;
     if (!userId) return res.status(401).json({ error: "Unauthorized" });
 
     const { status } = req.body as { status?: string };
-    if (!status || !["confirmed", "rejected"].includes(status)) {
-      return res
-        .status(400)
-        .json({ error: "Status must be 'confirmed' or 'rejected'" });
-    }
+    if (!status || !["confirmed", "rejected"].includes(status))
+      return res.status(400).json({ error: "Status must be 'confirmed' or 'rejected'" });
 
-    const db = await getMongoDb();
-    const matchesCol = db.collection<MatchDocument>("matches");
-    const match = await matchesCol.findOne({ _id: new ObjectId(id) });
+    const match = matches.find((m) => m.id === id);
     if (!match) return res.status(404).json({ error: "Match not found" });
 
-    // Verify the user owns one of the matched items
-    const userItems = await db
-      .collection<ItemDocument>("items")
-      .find(
-        { reportedBy: new ObjectId(userId) },
-        { projection: { _id: 1 } }
-      )
-      .toArray();
-    const userItemIds = new Set(userItems.map((i) => i._id!.toString()));
+    const userItemIds = new Set(items.filter((i) => i.reportedBy === userId).map((i) => i.id));
+    if (!userItemIds.has(match.lostItemId) && !userItemIds.has(match.foundItemId))
+      return res.status(403).json({ error: "You can only manage matches for your own items" });
 
-    if (
-      !userItemIds.has(match.lostItemId.toString()) &&
-      !userItemIds.has(match.foundItemId.toString())
-    ) {
-      return res
-        .status(403)
-        .json({ error: "You can only manage matches for your own items" });
-    }
+    match.status = status as "confirmed" | "rejected";
 
-    await matchesCol.updateOne(
-      { _id: new ObjectId(id) },
-      { $set: { status: status as "confirmed" | "rejected" } }
-    );
-
-    // If confirmed, mark both items as resolved
     if (status === "confirmed") {
-      const itemsCol = db.collection("items");
-      await itemsCol.updateOne(
-        { _id: match.lostItemId },
-        { $set: { status: "resolved", updatedAt: new Date() } }
-      );
-      await itemsCol.updateOne(
-        { _id: match.foundItemId },
-        { $set: { status: "resolved", updatedAt: new Date() } }
-      );
+      const lostItem = items.find((i) => i.id === match.lostItemId);
+      const foundItem = items.find((i) => i.id === match.foundItemId);
+      if (lostItem) { lostItem.status = "resolved"; lostItem.updatedAt = new Date(); }
+      if (foundItem) { foundItem.status = "resolved"; foundItem.updatedAt = new Date(); }
     }
 
-    const updated = await matchesCol.findOne({ _id: new ObjectId(id) });
-    return res.status(200).json({ match: mapMatchDocument(updated!) });
+    return res.status(200).json({ match: toMatchRecord(match) });
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Unknown error";
     return res.status(500).json({ error: `Failed to update match: ${msg}` });

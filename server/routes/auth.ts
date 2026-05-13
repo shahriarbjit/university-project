@@ -1,33 +1,25 @@
 import { RequestHandler } from "express";
 import bcrypt from "bcryptjs";
-import { ObjectId } from "mongodb";
 import { AuthResponse, LoginRequest, RegisterRequest, UserRecord } from "@shared/api";
-import { getMongoDb } from "../db/mongodb";
 import { signAuthToken } from "../auth/jwt";
-
-interface UserDocument {
-  _id?: ObjectId;
-  email: string;
-  fullName: string;
-  passwordHash: string;
-  createdAt: Date;
-}
+import { users, nextId, seedPromise, type MemUser } from "../db/memory-store";
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function mapUserDocument(user: UserDocument): UserRecord {
+function toUserRecord(u: MemUser): UserRecord {
   return {
-    id: user._id?.toString() ?? "",
-    email: user.email,
-    fullName: user.fullName,
-    createdAt: new Date(user.createdAt).toISOString().split("T")[0],
+    id: u.id,
+    email: u.email,
+    fullName: u.fullName,
+    createdAt: new Date(u.createdAt).toISOString().split("T")[0],
   };
 }
 
 export const handleRegister: RequestHandler = async (req, res) => {
   try {
+    await seedPromise;
     const body = req.body as RegisterRequest;
     const email = normalizeEmail(body.email ?? "");
     const password = body.password ?? "";
@@ -36,50 +28,35 @@ export const handleRegister: RequestHandler = async (req, res) => {
     if (!email || !password || !fullName) {
       return res.status(400).json({ error: "email, password and fullName are required" });
     }
-
     if (password.length < 6) {
       return res.status(400).json({ error: "Password must be at least 6 characters" });
     }
 
-    const db = await getMongoDb();
-    const users = db.collection<UserDocument>("users");
-
-    const existingUser = await users.findOne({ email });
-    if (existingUser) {
+    if (users.find((u) => u.email === email)) {
       return res.status(409).json({ error: "Email is already registered" });
     }
 
-    const passwordHash = await bcrypt.hash(password, 10);
-    const createdAt = new Date();
-
-    const insertResult = await users.insertOne({
+    const newUser: MemUser = {
+      id: nextId(),
       email,
       fullName,
-      passwordHash,
-      createdAt,
-    });
-
-    const userRecord: UserRecord = {
-      id: insertResult.insertedId.toString(),
-      email,
-      fullName,
-      createdAt: createdAt.toISOString().split("T")[0],
+      passwordHash: await bcrypt.hash(password, 10),
+      createdAt: new Date(),
     };
+    users.push(newUser);
 
-    const response: AuthResponse = {
-      token: signAuthToken(userRecord),
-      user: userRecord,
-    };
-
+    const userRecord = toUserRecord(newUser);
+    const response: AuthResponse = { token: signAuthToken(userRecord), user: userRecord };
     return res.status(201).json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return res.status(500).json({ error: `Failed to register user: ${message}` });
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    return res.status(500).json({ error: `Failed to register user: ${msg}` });
   }
 };
 
 export const handleLogin: RequestHandler = async (req, res) => {
   try {
+    await seedPromise;
     const body = req.body as LoginRequest;
     const email = normalizeEmail(body.email ?? "");
     const password = body.password ?? "";
@@ -88,55 +65,41 @@ export const handleLogin: RequestHandler = async (req, res) => {
       return res.status(400).json({ error: "email and password are required" });
     }
 
-    const db = await getMongoDb();
-    const users = db.collection<UserDocument>("users");
-
-    const foundUser = await users.findOne({ email });
-    if (!foundUser) {
+    const user = users.find((u) => u.email === email);
+    if (!user) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const isPasswordValid = await bcrypt.compare(password, foundUser.passwordHash);
-    if (!isPasswordValid) {
+    const valid = await bcrypt.compare(password, user.passwordHash);
+    if (!valid) {
       return res.status(401).json({ error: "Invalid email or password" });
     }
 
-    const userRecord = mapUserDocument(foundUser);
-
-    const response: AuthResponse = {
-      token: signAuthToken(userRecord),
-      user: userRecord,
-    };
-
+    const userRecord = toUserRecord(user);
+    const response: AuthResponse = { token: signAuthToken(userRecord), user: userRecord };
     return res.status(200).json(response);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return res.status(500).json({ error: `Failed to login: ${message}` });
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    return res.status(500).json({ error: `Failed to login: ${msg}` });
   }
 };
 
 export const handleMe: RequestHandler = async (req, res) => {
   try {
+    await seedPromise;
     const authUserId = req.authUser?.userId;
     if (!authUserId) {
       return res.status(401).json({ error: "Authentication required" });
     }
 
-    if (!ObjectId.isValid(authUserId)) {
-      return res.status(401).json({ error: "Invalid token payload" });
-    }
-
-    const db = await getMongoDb();
-    const users = db.collection<UserDocument>("users");
-
-    const user = await users.findOne({ _id: new ObjectId(authUserId) });
+    const user = users.find((u) => u.id === authUserId);
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
 
-    return res.status(200).json({ user: mapUserDocument(user) });
+    return res.status(200).json({ user: toUserRecord(user) });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return res.status(500).json({ error: `Failed to load current user: ${message}` });
+    const msg = error instanceof Error ? error.message : "Unknown error";
+    return res.status(500).json({ error: `Failed to load current user: ${msg}` });
   }
 };

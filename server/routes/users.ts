@@ -1,49 +1,32 @@
 import { RequestHandler } from "express";
 import bcrypt from "bcryptjs";
-import { ObjectId } from "mongodb";
 import {
   CreateUserRequest,
   UpdateUserRequest,
   UserRecord,
   UsersResponse,
 } from "@shared/api";
-import { getMongoDb } from "../db/mongodb";
-
-interface UserDocument {
-  _id?: ObjectId;
-  email: string;
-  fullName: string;
-  passwordHash: string;
-  createdAt: Date;
-}
+import { users, nextId, seedPromise, type MemUser } from "../db/memory-store";
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase();
 }
 
-function mapUserDocument(user: UserDocument): UserRecord {
+function toUserRecord(u: MemUser): UserRecord {
   return {
-    id: user._id?.toString() ?? "",
-    email: user.email,
-    fullName: user.fullName,
-    createdAt: new Date(user.createdAt).toISOString().split("T")[0],
+    id: u.id,
+    email: u.email,
+    fullName: u.fullName,
+    createdAt: new Date(u.createdAt).toISOString().split("T")[0],
   };
 }
 
 export const handleGetUsers: RequestHandler = async (_req, res) => {
   try {
-    const db = await getMongoDb();
-    const usersCollection = db.collection<UserDocument>("users");
-
-    const usersFromDb = await usersCollection
-      .find({}, { projection: { email: 1, fullName: 1, createdAt: 1 } })
-      .sort({ createdAt: -1 })
-      .toArray();
-
+    await seedPromise;
     const response: UsersResponse = {
-      users: usersFromDb.map(mapUserDocument),
+      users: [...users].sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()).map(toUserRecord),
     };
-
     return res.status(200).json(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
@@ -53,40 +36,30 @@ export const handleGetUsers: RequestHandler = async (_req, res) => {
 
 export const handleCreateUser: RequestHandler = async (req, res) => {
   try {
+    await seedPromise;
     const body = req.body as CreateUserRequest;
     const email = normalizeEmail(body.email ?? "");
     const fullName = (body.fullName ?? "").trim();
     const password = body.password ?? "";
 
-    if (!email || !fullName || !password) {
+    if (!email || !fullName || !password)
       return res.status(400).json({ error: "email, fullName and password are required" });
-    }
-
-    if (password.length < 6) {
+    if (password.length < 6)
       return res.status(400).json({ error: "Password must be at least 6 characters" });
-    }
 
-    const db = await getMongoDb();
-    const usersCollection = db.collection<UserDocument>("users");
-
-    const existing = await usersCollection.findOne({ email });
-    if (existing) {
+    if (users.find((u) => u.email === email))
       return res.status(409).json({ error: "Email already exists" });
-    }
 
-    const insert = await usersCollection.insertOne({
+    const newUser: MemUser = {
+      id: nextId(),
       email,
       fullName,
       passwordHash: await bcrypt.hash(password, 10),
       createdAt: new Date(),
-    });
+    };
+    users.push(newUser);
 
-    const created = await usersCollection.findOne({ _id: insert.insertedId });
-    if (!created) {
-      return res.status(500).json({ error: "Failed to create user" });
-    }
-
-    return res.status(201).json({ user: mapUserDocument(created) });
+    return res.status(201).json({ user: toUserRecord(newUser) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return res.status(500).json({ error: `Failed to create user: ${message}` });
@@ -95,64 +68,35 @@ export const handleCreateUser: RequestHandler = async (req, res) => {
 
 export const handleUpdateUser: RequestHandler = async (req, res) => {
   try {
-    const paramId = req.params.id;
-    const targetId = Array.isArray(paramId) ? paramId[0] : paramId;
+    await seedPromise;
+    const targetId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const requesterId = req.authUser?.userId;
 
-    if (!targetId || !requesterId || !ObjectId.isValid(targetId)) {
+    if (!targetId || !requesterId)
       return res.status(400).json({ error: "Invalid request" });
-    }
 
-    if (targetId === requesterId) {
+    if (targetId === requesterId)
       return res.status(403).json({ error: "You cannot update your own account from this screen" });
-    }
+
+    const user = users.find((u) => u.id === targetId);
+    if (!user) return res.status(404).json({ error: "User not found" });
 
     const body = req.body as UpdateUserRequest;
-    const updateDoc: Partial<UserDocument> = {};
 
     if (body.email) {
-      updateDoc.email = normalizeEmail(body.email);
-    }
-
-    if (body.fullName) {
-      updateDoc.fullName = body.fullName.trim();
-    }
-
-    if (body.password) {
-      if (body.password.length < 6) {
-        return res.status(400).json({ error: "Password must be at least 6 characters" });
-      }
-      updateDoc.passwordHash = await bcrypt.hash(body.password, 10);
-    }
-
-    if (Object.keys(updateDoc).length === 0) {
-      return res.status(400).json({ error: "No fields provided for update" });
-    }
-
-    const db = await getMongoDb();
-    const usersCollection = db.collection<UserDocument>("users");
-
-    if (updateDoc.email) {
-      const duplicate = await usersCollection.findOne({
-        email: updateDoc.email,
-        _id: { $ne: new ObjectId(targetId) },
-      });
-      if (duplicate) {
+      const newEmail = normalizeEmail(body.email);
+      if (users.find((u) => u.email === newEmail && u.id !== targetId))
         return res.status(409).json({ error: "Email already exists" });
-      }
+      user.email = newEmail;
+    }
+    if (body.fullName) user.fullName = body.fullName.trim();
+    if (body.password) {
+      if (body.password.length < 6)
+        return res.status(400).json({ error: "Password must be at least 6 characters" });
+      user.passwordHash = await bcrypt.hash(body.password, 10);
     }
 
-    const updateResult = await usersCollection.findOneAndUpdate(
-      { _id: new ObjectId(targetId) },
-      { $set: updateDoc },
-      { returnDocument: "after" },
-    );
-
-    if (!updateResult) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    return res.status(200).json({ user: mapUserDocument(updateResult) });
+    return res.status(200).json({ user: toUserRecord(user) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
     return res.status(500).json({ error: `Failed to update user: ${message}` });
@@ -161,27 +105,20 @@ export const handleUpdateUser: RequestHandler = async (req, res) => {
 
 export const handleDeleteUser: RequestHandler = async (req, res) => {
   try {
-    const paramId = req.params.id;
-    const targetId = Array.isArray(paramId) ? paramId[0] : paramId;
+    await seedPromise;
+    const targetId = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
     const requesterId = req.authUser?.userId;
 
-    if (!targetId || !requesterId || !ObjectId.isValid(targetId)) {
+    if (!targetId || !requesterId)
       return res.status(400).json({ error: "Invalid request" });
-    }
 
-    if (targetId === requesterId) {
+    if (targetId === requesterId)
       return res.status(403).json({ error: "You cannot delete your own account from this screen" });
-    }
 
-    const db = await getMongoDb();
-    const usersCollection = db.collection<UserDocument>("users");
+    const idx = users.findIndex((u) => u.id === targetId);
+    if (idx === -1) return res.status(404).json({ error: "User not found" });
 
-    const deleteResult = await usersCollection.deleteOne({ _id: new ObjectId(targetId) });
-
-    if (deleteResult.deletedCount === 0) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
+    users.splice(idx, 1);
     return res.status(200).json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
